@@ -1,17 +1,22 @@
 #include <Python.h>
 
 /*
+ * This is a project forked from https://github.com/amitdev/lru-dict and I added ttl feature for it.
+ * 
  * This is a simple implementation of LRU Dict that uses a Python dict and an associated doubly linked
- * list to keep track of recently inserted/accessed items.
+ * list to keep track of recently inserted/accessed items. It also supports TTL feature to expire items
+ * which makes it more suitable to be a cache
  *
  * Dict will store: key -> Node mapping, where Node is a linked list node.
- * The Node itself will contain the value as well as the key.
+ * The Node itself will contain the value, the key, as well as the expire time.
+ * TTL is in nanoseconds, we can save some conversion time because Python C-API use ns to represent time.
+ * 
+ * For eg, two items with default 60s ttl and one item with specified 10s ttl:
  *
- * For eg:
- *
- * >>> l = LRU(2)
+ * >>> l = TTLRU(2, 60*1000000000)
  * >>> l[0] = 'foo'
  * >>> l[1] = 'bar'
+ * >>> l.set_with_ttl(2, 'baz', 10*1000000000)
  *
  * can be visualised as:
  *
@@ -28,7 +33,7 @@
  *
  *  The invariant is to maintain the list to reflect the LRU order of items in the dict.
  *  self->first will point to the MRU item and self-last to LRU item. Size of list will not
- *  grow beyond size of LRU dict.
+ *  grow beyond size of TTLRU dict.
  *
  */
 
@@ -38,6 +43,8 @@
 
 #define GET_NODE(d, key) (Node *) Py_TYPE(d)->tp_as_mapping->mp_subscript((d), (key))
 #define PUT_NODE(d, key, node) Py_TYPE(d)->tp_as_mapping->mp_ass_subscript((d), (key), ((PyObject *)node))
+
+#define IS_EXPIRED(t_now, node) (t_now > node->expire && node->expire != -1)
 
 /* If someone figures out how to enable debug builds with setuptools, you can delete this */
 #if 0
@@ -58,6 +65,7 @@ typedef struct _Node {
     PyObject_HEAD
     PyObject * value;
     PyObject * key;
+    _PyTime_t expire;
     struct _Node * prev;
     struct _Node * next;
 } Node;
@@ -80,7 +88,7 @@ node_repr(Node* self)
 
 static PyTypeObject NodeType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "lru.Node",              /* tp_name */
+    "ttlru.Node",              /* tp_name */
     sizeof(Node),            /* tp_basicsize */
     0,                       /* tp_itemsize */
     (destructor)node_dealloc,/* tp_dealloc */
@@ -128,6 +136,7 @@ typedef struct {
     Py_ssize_t hits;
     Py_ssize_t misses;
     PyObject *callback;
+    _PyTime_t default_ttl;
 } LRU;
 
 
@@ -145,7 +154,7 @@ set_callback(LRU *self, PyObject *args)
             PyErr_SetString(PyExc_TypeError, "parameter must be callable");
             return NULL;
         } else {
-            Py_XINCREF(temp);         /* Add a reference to new callback */
+            Py_XINCREF(temp);            /* Add a reference to new callback */
             Py_XDECREF(self->callback);  /* Dispose of previous callback */
             self->callback = temp;       /* Remember new callback */
         }
@@ -210,16 +219,61 @@ lru_delete_last(LRU *self)
     PUT_NODE(self->dict, n->key, NULL);
 }
 
+
+
+static void
+lru_delete_expire(LRU *self, Node* n)
+{
+    PyObject *arglist;
+    PyObject *result;
+
+
+    if (self->callback) {
+        
+        arglist = Py_BuildValue("OO", n->key, n->value);
+        result = PyObject_CallObject(self->callback, arglist);
+        Py_XDECREF(result);
+        Py_DECREF(arglist);
+    }
+
+    lru_remove_node(self, n);
+    PUT_NODE(self->dict, n->key, NULL);
+}
+
+
+
 static Py_ssize_t
 lru_length(LRU *self)
 {
     return PyDict_Size(self->dict);
 }
 
+
+static int
+LRU_contains_check_with_ttl(LRU *self, PyObject *key)
+{
+    _PyTime_t t_now;
+
+    Node *node = GET_NODE(self->dict, key);
+    PyErr_Clear();  /* GET_NODE sets an exception on miss. Shut it up. */
+    if (!node) {
+        return 0;
+    }
+    
+    assert(PyObject_TypeCheck(node, &NodeType));
+
+    t_now = _PyTime_GetSystemClock();
+    if (IS_EXPIRED(t_now, node)){
+        lru_delete_expire(self, node);
+        return 0;
+    }
+    return 1;
+}
+
 static PyObject *
 LRU_contains_key(LRU *self, PyObject *key)
 {
-    if (PyDict_Contains(self->dict, key)) {
+    if (LRU_contains_check_with_ttl(self, key)) {
         Py_RETURN_TRUE;
     } else {
         Py_RETURN_FALSE;
@@ -238,12 +292,14 @@ LRU_contains(LRU *self, PyObject *args)
 static int
 LRU_seq_contains(LRU *self, PyObject *key)
 {
-    return PyDict_Contains(self->dict, key);
+    return LRU_contains_check_with_ttl(self, key);
 }
 
 static PyObject *
 lru_subscript(LRU *self, register PyObject *key)
 {
+    _PyTime_t t_now;
+
     Node *node = GET_NODE(self->dict, key);
     if (!node) {
         self->misses++;
@@ -251,6 +307,13 @@ lru_subscript(LRU *self, register PyObject *key)
     }
 
     assert(PyObject_TypeCheck(node, &NodeType));
+
+    t_now = _PyTime_GetSystemClock();
+    if (IS_EXPIRED(t_now, node)){
+        lru_delete_expire(self, node);
+        self->misses++;
+        return NULL;
+    }
 
     /* We don't need to move the node when it's already self->first. */
     if (node != self->first) {
@@ -288,9 +351,10 @@ LRU_get(LRU *self, PyObject *args)
 }
 
 static int
-lru_ass_sub(LRU *self, PyObject *key, PyObject *value)
+LRU_ass_sub_ttl(LRU *self, PyObject *key, PyObject *value, _PyTime_t ttl)
 {
     int res = 0;
+    _PyTime_t t_now;
     Node *node = GET_NODE(self->dict, key);
     PyErr_Clear();  /* GET_NODE sets an exception on miss. Shut it up. */
 
@@ -322,6 +386,12 @@ lru_ass_sub(LRU *self, PyObject *key, PyObject *value)
                 lru_add_node_at_head(self, node);
             }
         }
+        if (ttl == -1)
+            node->expire = -1;
+        else{
+            t_now = _PyTime_GetSystemClock();
+            node->expire = t_now + ttl;
+        }
     } else {
         res = PUT_NODE(self->dict, key, NULL);
         if (res == 0) {
@@ -334,29 +404,71 @@ lru_ass_sub(LRU *self, PyObject *key, PyObject *value)
     return res;
 }
 
+static int
+lru_ass_sub(LRU *self, PyObject *key, PyObject *value)
+{
+    return LRU_ass_sub_ttl(self, key, value, self->default_ttl);
+}
+
+static PyObject *
+LRU_set_with_ttl(LRU *self, PyObject *args)
+{
+    PyObject *key;
+    PyObject *value;
+    _PyTime_t ttl;
+    if (!PyArg_ParseTuple(args, "OOL", &key, &value, &ttl))
+        return NULL;
+    LRU_ass_sub_ttl(self, key, value, ttl);
+    Py_RETURN_NONE;
+}
+
 static PyMappingMethods LRU_as_mapping = {
     (lenfunc)lru_length,        /*mp_length*/
     (binaryfunc)lru_subscript,  /*mp_subscript*/
     (objobjargproc)lru_ass_sub, /*mp_ass_subscript*/
 };
 
+
+static PyObject *
+get_item(Node *node)
+{
+    PyObject *tuple = PyTuple_New(2);
+    Py_INCREF(node->key);
+    PyTuple_SET_ITEM(tuple, 0, node->key);
+    Py_INCREF(node->value);
+    PyTuple_SET_ITEM(tuple, 1, node->value);
+    return tuple;
+}
+
 static PyObject *
 collect(LRU *self, PyObject * (*getterfunc)(Node *))
 {
     register PyObject *v;
-    Node *curr;
+    Node *curr, *need_delete;
     int i;
-    v = PyList_New(lru_length(self));
+    _PyTime_t t_now;
+    Py_ssize_t old_length;
+
+    old_length = lru_length(self);
+    v = PyList_New(old_length);
     if (v == NULL)
         return NULL;
     curr = self->first;
     i = 0;
+    t_now = _PyTime_GetSystemClock();
 
     while (curr) {
-        PyList_SET_ITEM(v, i++, getterfunc(curr));
-        curr = curr->next;
+        if (IS_EXPIRED(t_now, curr)){
+            need_delete = curr;
+            curr = curr->next;
+            lru_remove_node(self, need_delete);
+        } else {
+            PyList_SET_ITEM(v, i++, getterfunc(curr));
+            curr = curr->next;    
+        }
     }
     assert(i == lru_length(self));
+    PyList_SetSlice(v, i, old_length, NULL);
     return v;
 }
 
@@ -392,29 +504,43 @@ LRU_update(LRU *self, PyObject *args, PyObject *kwargs)
 static PyObject *
 LRU_peek_first_item(LRU *self)
 {
-    if (self->first) {
-        PyObject *tuple = PyTuple_New(2);
-        Py_INCREF(self->first->key);
-        PyTuple_SET_ITEM(tuple, 0, self->first->key);
-        Py_INCREF(self->first->value);
-        PyTuple_SET_ITEM(tuple, 1, self->first->value);
-        return tuple;
+    Node *node, *need_delete;
+    _PyTime_t t_now;
+
+    t_now = _PyTime_GetSystemClock();
+
+    node = self->first;
+    while (node) {
+        if (IS_EXPIRED(t_now, node)){
+            need_delete = node;
+            node = node->next;
+            lru_remove_node(self, need_delete);
+        } else {
+            return get_item(node);
+        }
     }
-    else Py_RETURN_NONE;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
 LRU_peek_last_item(LRU *self)
 {
-    if (self->last) {
-        PyObject *tuple = PyTuple_New(2);
-        Py_INCREF(self->last->key);
-        PyTuple_SET_ITEM(tuple, 0, self->last->key);
-        Py_INCREF(self->last->value);
-        PyTuple_SET_ITEM(tuple, 1, self->last->value);
-        return tuple;
+    Node *node, *need_delete;
+    _PyTime_t t_now;
+
+    t_now = _PyTime_GetSystemClock();
+
+    node = self->last;
+    while (node) {
+        if (IS_EXPIRED(t_now, node)){
+            need_delete = node;
+            node = node->prev;
+            lru_remove_node(self, need_delete);
+        } else {
+            return get_item(node);
+        }
     }
-    else Py_RETURN_NONE;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -441,16 +567,7 @@ LRU_set_callback(LRU *self, PyObject *args)
     return set_callback(self, args);
 }
 
-static PyObject *
-get_item(Node *node)
-{
-    PyObject *tuple = PyTuple_New(2);
-    Py_INCREF(node->key);
-    PyTuple_SET_ITEM(tuple, 0, node->key);
-    Py_INCREF(node->value);
-    PyTuple_SET_ITEM(tuple, 1, node->value);
-    return tuple;
-}
+
 
 static PyObject *
 LRU_items(LRU *self)
@@ -532,6 +649,8 @@ static PyMethodDef LRU_methods[] = {
                     PyDoc_STR("L.items() -> list of L's items (key,value) in MRU order")},
     {"has_key",	(PyCFunction)LRU_contains, METH_VARARGS,
                     PyDoc_STR("L.has_key(key) -> Check if key is there in L")},
+    {"set_with_ttl", (PyCFunction)LRU_set_with_ttl, METH_VARARGS,
+                    PyDoc_STR("L.set_with_ttl(key, value, ttl) -> Set key to value with a ttl")},                
     {"get",	(PyCFunction)LRU_get, METH_VARARGS,
                     PyDoc_STR("L.get(key, instead) -> If L has key return its value, otherwise instead")},
     {"set_size", (PyCFunction)LRU_set_size, METH_VARARGS,
@@ -562,10 +681,11 @@ LRU_repr(LRU* self)
 static int
 LRU_init(LRU *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"size", "callback", NULL};
+    static char *kwlist[] = {"size", "callback", "ttl", NULL};
     PyObject *callback = NULL;
     self->callback = NULL;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "n|O", kwlist, &self->size, &callback)) {
+    self->default_ttl = -1;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "n|OL", kwlist, &self->size, &callback, &self->default_ttl)) {
         return -1;
     }
 
@@ -601,23 +721,23 @@ LRU_dealloc(LRU *self)
 }
 
 PyDoc_STRVAR(lru_doc,
-"LRU(size, callback=None) -> new LRU dict that can store up to size elements\n"
-"An LRU dict behaves like a standard dict, except that it stores only fixed\n"
+"TTLRU(size, callback=None, ttl=1e9) -> new TTLRU dict that can store up to size elements\n"
+"A TTLRU dict behaves like a standard dict, except that it stores only fixed\n"
 "set of elements. Once the size overflows, it evicts least recently used\n"
 "items.  If a callback is set it will call the callback with the evicted key\n"
 " and item.\n\n"
 "Eg:\n"
-">>> l = LRU(3)\n"
+">>> l = TTLRU(3)\n"
 ">>> for i in range(5):\n"
 ">>>   l[i] = str(i)\n"
 ">>> l.keys()\n"
 "[2,3,4]\n\n"
-"Note: An LRU(n) can be thought of as a dict that will have the most\n"
+"Note: A TTLRU(n) can be thought of as a dict that will have the most\n"
 "recently accessed n items.\n");
 
 static PyTypeObject LRUType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "lru.LRU",               /* tp_name */
+    "ttlru.TTLRU",           /* tp_name */
     sizeof(LRU),             /* tp_basicsize */
     0,                       /* tp_itemsize */
     (destructor)LRU_dealloc, /* tp_dealloc */
@@ -659,7 +779,7 @@ static PyTypeObject LRUType = {
 #if PY_MAJOR_VERSION >= 3
   static struct PyModuleDef moduledef = {
     PyModuleDef_HEAD_INIT,
-    "lru",            /* m_name */
+    "ttlru",          /* m_name */
     lru_doc,          /* m_doc */
     -1,               /* m_size */
     NULL,             /* m_methods */
@@ -686,7 +806,7 @@ moduleinit(void)
     #if PY_MAJOR_VERSION >= 3
         m = PyModule_Create(&moduledef);
     #else
-        m = Py_InitModule3("lru", NULL, lru_doc);
+        m = Py_InitModule3("ttlru", NULL, lru_doc);
     #endif
 
     if (m == NULL)
@@ -694,7 +814,7 @@ moduleinit(void)
 
     Py_INCREF(&NodeType);
     Py_INCREF(&LRUType);
-    PyModule_AddObject(m, "LRU", (PyObject *) &LRUType);
+    PyModule_AddObject(m, "TTLRU", (PyObject *) &LRUType);
 
     return m;
 }
@@ -707,7 +827,7 @@ moduleinit(void)
     }
 #else
     PyMODINIT_FUNC
-    PyInit_lru(void)
+    PyInit_ttlru(void)
     {
         return moduleinit();
     }

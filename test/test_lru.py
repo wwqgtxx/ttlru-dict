@@ -2,14 +2,15 @@ import gc
 import random
 import sys
 import unittest
-from lru import LRU
+import time
+from ttlru import TTLRU
 
 SIZES = [1, 2, 10, 1000]
 
 # Only available on debug python builds.
 gettotalrefcount = getattr(sys, 'gettotalrefcount', lambda: 0)
 
-class TestLRU(unittest.TestCase):
+class TestTTLRU(unittest.TestCase):
 
     def setUp(self):
         gc.collect()
@@ -27,24 +28,24 @@ class TestLRU(unittest.TestCase):
         self.assertEqual(list(zip(valid_keys, valid_vals)), l.items())
 
     def test_invalid_size(self):
-        self.assertRaises(ValueError, LRU, -1)
-        self.assertRaises(ValueError, LRU, 0)
+        self.assertRaises(ValueError, TTLRU, -1)
+        self.assertRaises(ValueError, TTLRU, 0)
 
     def test_empty(self):
-        l = LRU(1)
+        l = TTLRU(1)
         self.assertEqual([], l.keys())
         self.assertEqual([], l.values())
 
     def test_add_within_size(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
             self._check_kvi(range(size-1,-1,-1), l)
 
     def test_delete_multiple_within_size(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
             for i in range(0,size,2):
@@ -56,7 +57,7 @@ class TestLRU(unittest.TestCase):
 
     def test_delete_multiple(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             n = size*2
             for i in range(n):
                 l[i] = str(i)
@@ -72,7 +73,7 @@ class TestLRU(unittest.TestCase):
 
     def test_add_multiple(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
             l[size] = str(size)
@@ -80,7 +81,7 @@ class TestLRU(unittest.TestCase):
 
     def test_access_within_size(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
             for i in range(size):
@@ -89,7 +90,7 @@ class TestLRU(unittest.TestCase):
 
     def test_contains(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
             for i in range(size):
@@ -97,7 +98,7 @@ class TestLRU(unittest.TestCase):
 
     def test_access(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             n = size * 2
             for i in range(n):
                 l[i] = str(i)
@@ -108,7 +109,7 @@ class TestLRU(unittest.TestCase):
 
 
     def test_update(self):
-        l = LRU(2)
+        l = TTLRU(2)
         l['a'] = 1
         self.assertEqual(l['a'], 1)
         l.update(a=2)
@@ -130,21 +131,21 @@ class TestLRU(unittest.TestCase):
 
 
     def test_peek_first_item(self):
-        l = LRU(2)
+        l = TTLRU(2)
         self.assertEqual(None, l.peek_first_item())
         l[1] = '1'
         l[2] = '2'
         self.assertEqual((2, '2'), l.peek_first_item())
 
     def test_peek_last_item(self):
-        l = LRU(2)
+        l = TTLRU(2)
         self.assertEqual(None, l.peek_last_item())
         l[1] = '1'
         l[2] = '2'
         self.assertEqual((1, '1'), l.peek_last_item())
 
     def test_overwrite(self):
-        l = LRU(1)
+        l = TTLRU(1)
         l[1] = '2'
         l[1] = '1'
         self.assertEqual('1', l[1])
@@ -152,7 +153,7 @@ class TestLRU(unittest.TestCase):
 
     def test_has_key(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(2*size):
                 l[i] = str(i)
                 self.assertTrue(l.has_key(i))
@@ -163,12 +164,12 @@ class TestLRU(unittest.TestCase):
 
     def test_capacity_get(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             self.assertTrue(size == l.get_size())
 
     def test_capacity_set(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size+5):
                 l[i] = str(i)
             l.set_size(size+10)
@@ -181,7 +182,7 @@ class TestLRU(unittest.TestCase):
             self.assertTrue(len(l) == size+10-1)
 
     def test_unhashable(self):
-        l = LRU(1)
+        l = TTLRU(1)
         self.assertRaises(TypeError, lambda: l[{'a': 'b'}])
         with self.assertRaises(TypeError):
             l[['1']] = '2'
@@ -190,7 +191,7 @@ class TestLRU(unittest.TestCase):
 
     def test_clear(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size+5):
                 l[i] = str(i)
             l.clear()
@@ -202,7 +203,7 @@ class TestLRU(unittest.TestCase):
             self.assertTrue(len(l) == 0)
 
     def test_get_and_del(self):
-        l = LRU(2)
+        l = TTLRU(2)
         l[1] = '1'
         self.assertEqual('1', l.get(1))
         self.assertEqual('1', l.get(2, '1'))
@@ -214,7 +215,7 @@ class TestLRU(unittest.TestCase):
 
     def test_stats(self):
         for size in SIZES:
-            l = LRU(size)
+            l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
 
@@ -241,14 +242,14 @@ class TestLRU(unittest.TestCase):
             self.assertTrue(l.get_stats() == (0, 0))
 
     def test_lru(self):
-        l = LRU(1)
+        l = TTLRU(1)
         l['a'] = 1
         l['a']
         self.assertEqual(l.keys(), ['a'])
         l['b'] = 2
         self.assertEqual(l.keys(), ['b'])
 
-        l = LRU(2)
+        l = TTLRU(2)
         l['a'] = 1
         l['b'] = 2
         self.assertEqual(len(l), 2)
@@ -258,7 +259,7 @@ class TestLRU(unittest.TestCase):
         l['c']
         self.assertEqual(sorted(l.keys()), ['a', 'c'])
 
-        l = LRU(3)
+        l = TTLRU(3)
         l['a'] = 1
         l['b'] = 2
         l['c'] = 3
@@ -283,7 +284,7 @@ class TestLRU(unittest.TestCase):
             self.assertEqual(value, first_value)
             counter[0] += 1
 
-        l = LRU(1, callback=callback)
+        l = TTLRU(1, callback=callback)
         l[first_key] = first_value
         l['b'] = 1              # test calling the callback
 
@@ -296,7 +297,7 @@ class TestLRU(unittest.TestCase):
         self.assertEqual(l.values(), [2])
 
 
-        l = LRU(1, callback=callback)
+        l = TTLRU(1, callback=callback)
         l[first_key] = first_value
 
         l.set_callback(None)
@@ -309,7 +310,7 @@ class TestLRU(unittest.TestCase):
         self.assertEqual(counter[0], 1)
         self.assertEqual(l.keys(), [])
 
-        l = LRU(2, callback=callback)
+        l = TTLRU(2, callback=callback)
         l['a'] = 1              # test calling the callback
         l['b'] = 2              # test calling the callback
 
@@ -318,6 +319,102 @@ class TestLRU(unittest.TestCase):
         l.set_size(1)
         self.assertEqual(counter[0], 2) # callback invoked
         self.assertEqual(l.keys(), ['b'])
+
+    def test_default_ttl(self):
+        l = TTLRU(2, ttl=int(20e6))
+        l[0] = 0
+        l[1] = 1
+        self.assertEqual(l[0], 0)
+        self.assertEqual(l[1], 1)
+        self.assertTrue(l.has_key(0))
+        self.assertTrue(l.has_key(1))
+        self.assertTrue(0 in l)
+        self.assertTrue(1 in l)
+        time.sleep(0.020)
+        self.assertFalse(l.has_key(0))
+        self.assertFalse(l.has_key(1))
+        self.assertFalse(0 in l)
+        self.assertFalse(1 in l)
+
+    def test_set_with_ttl(self):
+        l = TTLRU(2)
+        l.set_with_ttl(0, 0, int(20e6))
+        l.set_with_ttl(1, 1, int(80e6))
+        self.assertTrue(0 in l)
+        self.assertTrue(1 in l)
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertTrue(0 in l)
+        self.assertTrue(1 in l)
+        time.sleep(0.01)  # approximately 0.02s
+        self.assertTrue(0 not in l)
+        self.assertTrue(1 in l)
+        time.sleep(0.01)  # approximately 0.03s
+        self.assertTrue(0 not in l)
+        self.assertTrue(1 in l)        
+        time.sleep(0.04)  # approximately 0.07s
+        self.assertTrue(0 not in l)
+        self.assertTrue(1 in l)   
+        time.sleep(0.005)  # approximately 0.08s
+        self.assertTrue(0 not in l)
+        self.assertTrue(1 not in l)
+
+    def test_peek_first_item_ttl(self):
+        l = TTLRU(2)
+        l.set_with_ttl(0, 0, int(80e6))
+        l.set_with_ttl(1, 1, int(20e6))
+        self.assertEqual(l.peek_first_item(), (1,1))
+        self.assertEqual(l.peek_last_item(), (0,0))
+
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertEqual(l.peek_first_item(), (1,1))
+
+        time.sleep(0.01)  # approximately 0.02s
+        self.assertEqual(l.peek_first_item(), (0,0))
+
+        time.sleep(0.05)  # approximately 0.07s
+        self.assertEqual(l.peek_first_item(), (0,0))
+
+        time.sleep(0.01)  # approximately 0.08s
+        self.assertEqual(l.peek_first_item(), None)
+
+    def test_peek_last_item_ttl(self):
+        l = TTLRU(2)
+        l.set_with_ttl(0, 0, int(80e6))
+        l.set_with_ttl(1, 1, int(20e6))
+        self.assertEqual(l.peek_first_item(), (1,1))
+        self.assertEqual(l.peek_last_item(), (0,0))
+
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertEqual(l.peek_last_item(), (0,0))
+
+        time.sleep(0.01)  # approximately 0.02s
+        self.assertEqual(l.peek_last_item(), (0,0))
+
+        time.sleep(0.05)  # approximately 0.07s
+        self.assertEqual(l.peek_last_item(), (0,0))
+
+        time.sleep(0.01)  # approximately 0.08s
+        self.assertEqual(l.peek_first_item(), None)
+
+
+        l.set_with_ttl(0, 0, int(10e6))
+        l.set_with_ttl(1, 1, int(20e6))
+
+        self.assertEqual(l.peek_last_item(), (0,0))
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertEqual(l.peek_last_item(), (1,1))
+        time.sleep(0.01)  # approximately 0.02s
+        self.assertEqual(l.peek_first_item(), None)
+
+    def test_no_ttl(self):
+        l = TTLRU(2)
+        l.set_with_ttl(0, 0, -1)
+        l.set_with_ttl(1, 1, int(20e6))
+        self.assertEqual(l.items(), [(1, 1), (0, 0)])
+        time.sleep(0.02)  # approximately 0.02s
+        self.assertEqual(l.items(), [(0, 0)])
+        time.sleep(0.02)  # approximately 0.04s
+        self.assertEqual(l.items(), [(0, 0)])
 
 if __name__ == '__main__':
     unittest.main()
