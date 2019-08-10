@@ -354,7 +354,7 @@ class TestTTLRU(unittest.TestCase):
         time.sleep(0.04)  # approximately 0.07s
         self.assertTrue(0 not in l)
         self.assertTrue(1 in l)   
-        time.sleep(0.005)  # approximately 0.08s
+        time.sleep(0.01)  # approximately 0.08s
         self.assertTrue(0 not in l)
         self.assertTrue(1 not in l)
 
@@ -415,6 +415,107 @@ class TestTTLRU(unittest.TestCase):
         self.assertEqual(l.items(), [(0, 0)])
         time.sleep(0.02)  # approximately 0.04s
         self.assertEqual(l.items(), [(0, 0)])
+    
+    def test_replace_key_with_ttl(self):
+        l = TTLRU(2, ttl=int(20e6))
+        l[1] = 1
+        self.assertEqual(l.items(), [(1, 1)])
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertEqual(l.items(), [(1, 1)])
+        l[1] = 2
+        self.assertEqual(l.items(), [(1, 2)])
+        time.sleep(0.01)  # approximately 0.01s
+        self.assertEqual(l.items(), [(1, 2)])
+        time.sleep(0.01)  # approximately 0.03s
+        self.assertEqual(l.items(), [])
+
+    def test_ref_count(self):
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        l.get(1)
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        l.peek_first_item()
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        l.peek_last_item()
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        l.keys()
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        l[1] = 2
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        1 in l
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        time.sleep(0.02)
+        self.assertEqual(sys.getrefcount(x), 3)
+        try:
+            l[1]
+        except:
+            pass
+        self.assertEqual(sys.getrefcount(x), 2)
+
+        # ====================
+        l = TTLRU(2,ttl=int(20e6))
+        x = {1:2}
+        self.assertEqual(sys.getrefcount(x), 2)
+        l[1] = x
+        self.assertEqual(sys.getrefcount(x), 3)
+        l[1] = 2
+        self.assertEqual(sys.getrefcount(x), 2)
 
 if __name__ == '__main__':
     unittest.main()

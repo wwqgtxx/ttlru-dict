@@ -4,7 +4,7 @@ module1 = Extension('ttlru',
                     sources = ['ttlru.c'])
 
 setup (name = 'ttlru-dict',
-       version = '1.0.0',
+       version = '1.0.1',
        description = 'An Dict like LRU container which also has ttl feature.',
        long_description = open('README.md').read(),
        long_description_content_type="text/markdown",

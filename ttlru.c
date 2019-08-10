@@ -265,6 +265,7 @@ LRU_contains_check_with_ttl(LRU *self, PyObject *key)
     t_now = _PyTime_GetSystemClock();
     if (IS_EXPIRED(t_now, node)){
         lru_delete_expire(self, node);
+        Py_DECREF(node);
         return 0;
     }
     return 1;
@@ -311,6 +312,7 @@ lru_subscript(LRU *self, register PyObject *key)
     t_now = _PyTime_GetSystemClock();
     if (IS_EXPIRED(t_now, node)){
         lru_delete_expire(self, node);
+        Py_DECREF(node); 
         self->misses++;
         return NULL;
     }
@@ -462,6 +464,7 @@ collect(LRU *self, PyObject * (*getterfunc)(Node *))
             need_delete = curr;
             curr = curr->next;
             lru_remove_node(self, need_delete);
+            PUT_NODE(self->dict, need_delete->key, NULL);
         } else {
             PyList_SET_ITEM(v, i++, getterfunc(curr));
             curr = curr->next;    
@@ -515,6 +518,7 @@ LRU_peek_first_item(LRU *self)
             need_delete = node;
             node = node->next;
             lru_remove_node(self, need_delete);
+            PUT_NODE(self->dict, need_delete->key, NULL);
         } else {
             return get_item(node);
         }
@@ -536,6 +540,7 @@ LRU_peek_last_item(LRU *self)
             need_delete = node;
             node = node->prev;
             lru_remove_node(self, need_delete);
+            PUT_NODE(self->dict, need_delete->key, NULL);
         } else {
             return get_item(node);
         }
