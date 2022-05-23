@@ -333,10 +333,10 @@ static PyObject *
 LRU_get(LRU *self, PyObject *args)
 {
     PyObject *key;
-    PyObject *instead = NULL;
+    PyObject *default_obj = NULL;
     PyObject *result;
 
-    if (!PyArg_ParseTuple(args, "O|O", &key, &instead))
+    if (!PyArg_ParseTuple(args, "O|O", &key, &default_obj))
         return NULL;
 
     result = lru_subscript(self, key);
@@ -344,12 +344,12 @@ LRU_get(LRU *self, PyObject *args)
     if (result)
         return result;
 
-    if (!instead) {
+    if (!default_obj) {
         Py_RETURN_NONE;
     }
 
-    Py_INCREF(instead);
-    return instead;
+    Py_INCREF(default_obj);
+    return default_obj;
 }
 
 static int
@@ -527,6 +527,38 @@ LRU_setdefault(LRU *self, PyObject *args)
 
     Py_INCREF(default_obj);
     return default_obj;
+}
+
+static PyObject *
+LRU_getset_with_default_factory(LRU *self, PyObject *args)
+{
+    PyObject *key;
+    PyObject *default_factory = NULL;
+    PyObject *result;
+
+    if (!PyArg_ParseTuple(args, "OO", &key, &default_factory))
+        return NULL;
+
+    result = lru_subscript(self, key);
+    PyErr_Clear();
+    if (result)
+        return result;
+
+    if (!PyCallable_Check(default_factory)) {
+        PyErr_SetString(PyExc_TypeError, "parameter must be callable");
+        return NULL;
+    }
+
+    result = PyObject_CallObject(default_factory, NULL);
+
+    if (!result)
+        return NULL;
+
+    if (lru_ass_sub(self, key, result) != 0)
+        return NULL;
+
+    Py_INCREF(result);
+    return result;
 }
 
 static PyObject *
@@ -745,9 +777,11 @@ static PyMethodDef LRU_methods[] = {
     {"set_with_ttl", (PyCFunction)LRU_set_with_ttl, METH_VARARGS,
                     PyDoc_STR("L.set_with_ttl(key, value, ttl) -> Set key to value with a ttl")},                
     {"get",	(PyCFunction)LRU_get, METH_VARARGS,
-                    PyDoc_STR("L.get(key, instead) -> If L has key return its value, otherwise instead")},
+                    PyDoc_STR("L.get(key, [, value]) -> If L has key return its value, otherwise instead")},
     {"setdefault", (PyCFunction)LRU_setdefault, METH_VARARGS,
                     PyDoc_STR("L.setdefault(key, default=None) -> If L has key return its value, otherwise insert key with a value of default and return default")},
+    {"getset_with_default_factory", (PyCFunction)LRU_getset_with_default_factory, METH_VARARGS,
+                    PyDoc_STR("L.getset_with_default_factory(key, default_factory) -> If L has key return its value, otherwise insert key with a new value from default_factory and return it")},
     {"pop", (PyCFunction)LRU_pop, METH_VARARGS,
                     PyDoc_STR("L.pop(key[, default]) -> If L has key return its value and remove it from L, otherwise return default. If default is not given and key is not in L, a KeyError is raised.")},
     {"popitem", (PyCFunctionWithKeywords)LRU_popitem, METH_VARARGS | METH_KEYWORDS,
