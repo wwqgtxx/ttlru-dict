@@ -41,17 +41,17 @@ class TestTTLRU(unittest.TestCase):
             l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
-            self._check_kvi(range(size-1,-1,-1), l)
+            self._check_kvi(range(size - 1, -1, -1), l)
 
     def test_delete_multiple_within_size(self):
         for size in SIZES:
             l = TTLRU(size)
             for i in range(size):
                 l[i] = str(i)
-            for i in range(0,size,2):
+            for i in range(0, size, 2):
                 del l[i]
-            self._check_kvi(range(size-1,0,-2), l)
-            for i in range(0,size,2):
+            self._check_kvi(range(size - 1, 0, -2), l)
+            for i in range(0, size, 2):
                 with self.assertRaises(KeyError):
                     l[i]
 
@@ -59,15 +59,17 @@ class TestTTLRU(unittest.TestCase):
         for size in SIZES:
             l = TTLRU(size)
             n = size*2
+            l = TTLRU(size)
+            n = size * 2
             for i in range(n):
                 l[i] = str(i)
-            for i in range(size,n,2):
+            for i in range(size, n, 2):
                 del l[i]
-            self._check_kvi(range(n-1,size,-2), l)
-            for i in range(0,size):
+            self._check_kvi(range(n - 1, size, -2), l)
+            for i in range(0, size):
                 with self.assertRaises(KeyError):
                     l[i]
-            for i in range(size,n,2):
+            for i in range(size, n, 2):
                 with self.assertRaises(KeyError):
                     l[i]
 
@@ -77,7 +79,7 @@ class TestTTLRU(unittest.TestCase):
             for i in range(size):
                 l[i] = str(i)
             l[size] = str(size)
-            self._check_kvi(range(size,0,-1), l)
+            self._check_kvi(range(size, 0, -1), l)
 
     def test_access_within_size(self):
         for size in SIZES:
@@ -86,7 +88,7 @@ class TestTTLRU(unittest.TestCase):
                 l[i] = str(i)
             for i in range(size):
                 self.assertEqual(l[i], str(i))
-                self.assertEqual(l.get(i,None), str(i))
+                self.assertEqual(l.get(i, None), str(i))
 
     def test_contains(self):
         for size in SIZES:
@@ -102,11 +104,10 @@ class TestTTLRU(unittest.TestCase):
             n = size * 2
             for i in range(n):
                 l[i] = str(i)
-            self._check_kvi(range(n-1,size-1,-1), l)
+            self._check_kvi(range(n - 1, size - 1, -1), l)
             for i in range(size, n):
                 self.assertEqual(l[i], str(i))
-                self.assertEqual(l.get(i,None), str(i))
-
+                self.assertEqual(l.get(i, None), str(i))
 
     def test_update(self):
         l = TTLRU(2)
@@ -120,7 +121,7 @@ class TestTTLRU(unittest.TestCase):
         self.assertEqual(('b', 3), l.peek_first_item())
         self.assertEqual(l['a'], 2)
         self.assertEqual(l['b'], 3)
-        l.update({'a':1, 'b':2})
+        l.update({'a': 1, 'b': 2})
         self.assertEqual(('b', 2), l.peek_first_item())
         self.assertEqual(l['a'], 1)
         self.assertEqual(l['b'], 2)
@@ -128,7 +129,6 @@ class TestTTLRU(unittest.TestCase):
         self.assertEqual(('b', 2), l.peek_first_item())
         l.update(a=2)
         self.assertEqual(('a', 2), l.peek_first_item())
-
 
     def test_peek_first_item(self):
         l = TTLRU(2)
@@ -154,10 +154,10 @@ class TestTTLRU(unittest.TestCase):
     def test_has_key(self):
         for size in SIZES:
             l = TTLRU(size)
-            for i in range(2*size):
+            for i in range(2 * size):
                 l[i] = str(i)
                 self.assertTrue(l.has_key(i))
-            for i in range(size, 2*size):
+            for i in range(size, 2 * size):
                 self.assertTrue(l.has_key(i))
             for i in range(size):
                 self.assertFalse(l.has_key(i))
@@ -172,14 +172,14 @@ class TestTTLRU(unittest.TestCase):
             l = TTLRU(size)
             for i in range(size+5):
                 l[i] = str(i)
-            l.set_size(size+10)
-            self.assertTrue(size+10 == l.get_size())
+            l.set_size(size + 10)
+            self.assertTrue(size + 10 == l.get_size())
             self.assertTrue(len(l) == size)
-            for i in range(size+20):
+            for i in range(size + 20):
                 l[i] = str(i)
-            self.assertTrue(len(l) == size+10)
-            l.set_size(size+10-1)
-            self.assertTrue(len(l) == size+10-1)
+            self.assertTrue(len(l) == size + 10)
+            l.set_size(size + 10 - 1)
+            self.assertTrue(len(l) == size + 10 - 1)
 
     def test_unhashable(self):
         l = TTLRU(1)
@@ -192,13 +192,13 @@ class TestTTLRU(unittest.TestCase):
     def test_clear(self):
         for size in SIZES:
             l = TTLRU(size)
-            for i in range(size+5):
+            for i in range(size + 5):
                 l[i] = str(i)
             l.clear()
             for i in range(size):
                 l[i] = str(i)
             for i in range(size):
-                _ = l[random.randint(0, size-1)]
+                _ = l[random.randint(0, size - 1)]
             l.clear()
             self.assertTrue(len(l) == 0)
 
@@ -212,6 +212,63 @@ class TestTTLRU(unittest.TestCase):
         self.assertRaises(KeyError, lambda: l['2'])
         with self.assertRaises(KeyError):
             del l['2']
+
+    def test_setdefault(self):
+        l = TTLRU(2)
+        l[1] = '1'
+        val = l.setdefault(1)
+        self.assertEqual('1', val)
+        self.assertEqual((1, 0), l.get_stats())
+        val = l.setdefault(2, '2')
+        self.assertEqual('2', val)
+        self.assertEqual((1, 1), l.get_stats())
+        self.assertEqual(val, l[2])
+        l.clear()
+        val = 'long string' * 512
+        l.setdefault(1, val)
+        l[2] = '2'
+        l[3] = '3'
+        self.assertTrue(val)
+
+    def test_pop(self):
+        l = TTLRU(2)
+        v = '2' * 4096
+        l[1] = '1'
+        l[2] = v
+        val = l.pop(1)
+        self.assertEqual('1', val)
+        self.assertEqual((1, 0), l.get_stats())
+        val = l.pop(2, 'not used')
+        self.assertEqual(v, val)
+        del val
+        self.assertTrue(v)
+        self.assertEqual((2, 0), l.get_stats())
+        val = l.pop(3, '3' * 4096)
+        self.assertEqual('3' * 4096, val)
+        self.assertEqual((2, 1), l.get_stats())
+        self.assertEqual(0, len(l))
+        with self.assertRaises(KeyError) as ke:
+            l.pop(4)
+            self.assertEqual(4, ke.args[0])
+        self.assertEqual((2, 2), l.get_stats())
+        self.assertEqual(0, len(l))
+        with self.assertRaises(TypeError):
+            l.pop()
+
+    def test_popitem(self):
+        l = TTLRU(3)
+        l[1] = '1'
+        l[2] = '2'
+        l[3] = '3'
+        k, v = l.popitem()
+        self.assertEqual((1, '1'), (k, v))
+        k, v = l.popitem(least_recent=False)
+        self.assertEqual((3, '3'), (k, v))
+        self.assertEqual((2, '2'), l.popitem(True))
+        with self.assertRaises(KeyError) as ke:
+            l.popitem()
+            self.assertEqual('popitem(): LRU dict is empty', ke.args[0])
+        self.assertEqual((0, 0), l.get_stats())
 
     def test_stats(self):
         for size in SIZES:
@@ -296,7 +353,6 @@ class TestTTLRU(unittest.TestCase):
         self.assertEqual(l.keys(), ['b'])
         self.assertEqual(l.values(), [2])
 
-
         l = TTLRU(1, callback=callback)
         l[first_key] = first_value
 
@@ -317,7 +373,7 @@ class TestTTLRU(unittest.TestCase):
         self.assertEqual(counter[0], 1)
         self.assertEqual(l.keys(), ['b', 'a'])
         l.set_size(1)
-        self.assertEqual(counter[0], 2) # callback invoked
+        self.assertEqual(counter[0], 2)  # callback invoked
         self.assertEqual(l.keys(), ['b'])
 
     def test_default_ttl(self):
