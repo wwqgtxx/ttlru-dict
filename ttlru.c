@@ -314,6 +314,7 @@ lru_subscript(LRU *self, register PyObject *key)
         lru_delete_expire(self, node);
         Py_DECREF(node); 
         self->misses++;
+        GET_NODE(self->dict, key);
         return NULL;
     }
 
